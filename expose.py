@@ -21,7 +21,7 @@ from docopt import docopt
 import hashlib
 import json
 import logging as l
-from multiprocessing import Pool
+from multiprocessing import Pool, Manager
 from os import getcwd, makedirs
 from os.path import join, basename, splitext, isfile, split
 from glob import glob
@@ -119,7 +119,6 @@ def mkdir_for_dst(dst):
 
 def convert_image(src, dst, size):
     mkdir_for_dst(dst)
-    print(sanitary_name(dst))
     check_call(['convert', src,
                 '-resize', '{}x{}>'.format(size, size),
                 dst])
@@ -128,18 +127,21 @@ def convert_image(src, dst, size):
 
 def convert_video(cfg, src, dst, fmt, resolution, bitrate):
     mkdir_for_dst(dst)
-    print(sanitary_name(dst))
     check_call(ffmpeg_video_cmd(cfg, src, dst, fmt, resolution, bitrate),
                shell=True)
     write_hash(src, dst)
 
 
-def convert_image_wrap(args_array):
-    convert_image(*args_array)
+def convert_image_wrap(queue_and_args):
+    queue, args = queue_and_args
+    convert_image(*args)
+    queue.put(True)
 
 
-def convert_video_wrap(args_array):
-    convert_video(*args_array)
+def convert_video_wrap(queue_and_args):
+    queue, args = queue_and_args
+    convert_video(*args)
+    queue.put(True)
 
 
 def sanitary_name(src):
@@ -278,14 +280,35 @@ def vid_jobs(cfg):
     return jobs
 
 
-def run_img_jobs(cfg):
+def run_jobs(jobs, is_video):
+    if not jobs:
+        return
+    if is_video:
+        wrapper = convert_video_wrap
+        media_type = 'video'
+    else:
+        wrapper = convert_image_wrap
+        media_type = 'image'
+    l.info('Processing {}s...'.format(media_type))
     with Pool() as pool:
-        pool.map(convert_image_wrap, img_jobs(cfg))
+        manager = Manager()
+        queue = manager.Queue()
+        wrapped_jobs = [(queue, j) for j in jobs]
+        total = len(wrapped_jobs)
+        bar = pyprind.ProgBar(total)
+        pool.map_async(wrapper, wrapped_jobs)
+        while total > 0:
+            queue.get()
+            bar.update()
+            total -= 1
 
 
-def run_vid_jobs(cfg):
-    with Pool() as pool:
-        pool.map(convert_video_wrap, vid_jobs(cfg))
+def run_img_jobs(jobs):
+    run_jobs(jobs, False)
+
+
+def run_vid_jobs(jobs):
+    run_jobs(jobs, True)
 
 
 if __name__ == '__main__':
@@ -310,14 +333,15 @@ if __name__ == '__main__':
 
     l.basicConfig(format='%(message)s', level=log_level)
 
+    ij = img_jobs(config)
+    vj = vid_jobs(config)
+
     if args['--dry-run']:
-        ij = img_jobs(config)
-        vj = vid_jobs(config)
         for job in ij:
             print(sanitary_name(job[1]))
         for job in vj:
             print(sanitary_name(job[2]))
 
     else:
-        run_img_jobs(config)
-        run_vid_jobs(config)
+        run_img_jobs(ij)
+        run_vid_jobs(vj)
