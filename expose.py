@@ -1,5 +1,26 @@
+"""
+expose.py
+process photos and videos into a static site photojournal
+https://github.com/mplewis/expose.py
+
+Usage:
+    expose.py [--dry-run] [(-v | --verbose)]
+    expose.py --version
+
+Options:
+    -h --help     Show this screen.
+    --version     Show version.
+    --dry-run     Don't process any files, just list them.
+    -v --verbose  Enable verbose log messages
+"""
+VERSION = 'expose.py 0.0.1'
+
+import pyprind
+from docopt import docopt
+
 import hashlib
 import json
+import logging as l
 from multiprocessing import Pool
 from os import getcwd, makedirs
 from os.path import join, basename, splitext, isfile, split
@@ -107,7 +128,7 @@ def convert_image(src, dst, size):
 
 def convert_video(cfg, src, dst, fmt, resolution, bitrate):
     mkdir_for_dst(dst)
-    print(src, fmt, resolution)
+    print(sanitary_name(dst))
     check_call(ffmpeg_video_cmd(cfg, src, dst, fmt, resolution, bitrate),
                shell=True)
     write_hash(src, dst)
@@ -173,6 +194,7 @@ def is_dirty(src, dst):
 
 def file_targets(cfg, src, is_video):
     targets = []
+    skipped = 0
     name, ext = sanitary_name_and_ext(src)
     width, height = dimensions(src)
     if is_video:
@@ -180,22 +202,46 @@ def file_targets(cfg, src, is_video):
             ext = VIDEO_FMT_EXTS[fmt]
             for i, resolution in enumerate(cfg.RESOLUTIONS):
                 if resolution > width:
+                    l.debug('Skipping {} @ {}: width {} < target resolution'
+                            .format(name, resolution, width))
                     continue
                 bitrate = cfg.VIDEO_BITRATES[i]
                 full = name + '-' + str(bitrate) + ext
                 dst = join(cfg.DST_DIR, target_dir(cfg, src), full)
                 if (not isfile(dst)) or is_dirty(src, dst):
+                    if not isfile(dst):
+                        reason = 'does not exist'
+                    else:
+                        reason = 'dirty'
+                    l.debug('Added target: {} @ {}px/{}M ({})'
+                            .format(name, resolution, bitrate, reason))
                     targets.append((cfg, src, dst, fmt, resolution, bitrate))
+                else:
+                    l.debug('Skipping {} @ {}: file exists and is cached'
+                            .format(name, resolution))
+                    skipped += 1
     else:
         longest = max(width, height)
         for resolution in cfg.RESOLUTIONS:
             if resolution > longest:
+                l.debug('Skipping {} @ {}: longest side {} < target resolution'
+                        .format(name, resolution, longest))
                 continue
             full = name + '-' + str(resolution) + ext
             dst = join(cfg.DST_DIR, target_dir(cfg, src), full)
             if (not isfile(dst)) or is_dirty(src, dst):
+                if not isfile(dst):
+                    reason = 'does not exist'
+                else:
+                    reason = 'dirty'
+                l.debug('Added target: {} @ {}px ({})'
+                        .format(name, resolution, reason))
                 targets.append((src, dst, resolution))
-    return targets
+            else:
+                l.debug('Skipping {} @ {}: file exists and is cached'
+                        .format(name, resolution))
+                skipped += 1
+    return targets, skipped
 
 
 def img_targets(cfg, src):
@@ -207,16 +253,28 @@ def vid_targets(cfg, src):
 
 
 def img_jobs(cfg):
+    l.info('Generating image jobs...')
     jobs = []
-    for src in src_images(cfg):
-        jobs.extend(img_targets(cfg, src))
+    skipped = 0
+    for src in pyprind.prog_bar(src_images(cfg)):
+        j, s = img_targets(cfg, src)
+        jobs.extend(j)
+        skipped += s
+    l.info('Image jobs: running {}, skipped {}, total {}'
+           .format(len(jobs), skipped, len(jobs) + skipped))
     return jobs
 
 
 def vid_jobs(cfg):
+    l.info('Generating video jobs...')
     jobs = []
-    for src in src_videos(cfg):
-        jobs.extend(vid_targets(cfg, src))
+    skipped = 0
+    for src in pyprind.prog_bar(src_videos(cfg)):
+        j, s = vid_targets(cfg, src)
+        jobs.extend(j)
+        skipped += s
+    l.info('Video jobs: running {}, skipped {}, total {}'
+           .format(len(jobs), skipped, len(jobs) + skipped))
     return jobs
 
 
@@ -232,6 +290,8 @@ def run_vid_jobs(cfg):
 
 if __name__ == '__main__':
 
+    args = docopt(__doc__, version=VERSION)
+
     config = Config(
         SRC_DIR=('/Users/mplewis/Dropbox (Personal)/projectsync/'
                  'images/BWCA 2015'),
@@ -244,6 +304,20 @@ if __name__ == '__main__':
         VIDEO_VBR_MAX_RATIO=2,
     )
 
-    run_img_jobs(config)
-    run_vid_jobs(config)
-    write_hashes(config)
+    log_level = l.INFO
+    if args['--verbose']:
+        log_level = l.DEBUG
+
+    l.basicConfig(format='%(message)s', level=log_level)
+
+    if args['--dry-run']:
+        ij = img_jobs(config)
+        vj = vid_jobs(config)
+        for job in ij:
+            print(sanitary_name(job[1]))
+        for job in vj:
+            print(sanitary_name(job[2]))
+
+    else:
+        run_img_jobs(config)
+        run_vid_jobs(config)

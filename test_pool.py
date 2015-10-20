@@ -1,4 +1,4 @@
-from pool import Config, target_dir, hash_path_for_file
+from expose import Config, target_dir, hash_path_for_file
 
 import sure  # noqa
 
@@ -23,6 +23,7 @@ def test_target_dir():
     )
     for in_fn, out_dir in expected:
         target_dir(config, in_fn).should.equal(out_dir)
+
 
 def test_hash_path_for_file():
     (hash_path_for_file('/usr/local/bin/my_file.txt')
