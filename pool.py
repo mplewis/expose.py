@@ -102,6 +102,7 @@ def convert_image(src, dst, size):
     check_call(['convert', src,
                 '-resize', '{}x{}>'.format(size, size),
                 dst])
+    write_hash(src, dst)
 
 
 def convert_video(cfg, src, dst, fmt, resolution, bitrate):
@@ -109,6 +110,7 @@ def convert_video(cfg, src, dst, fmt, resolution, bitrate):
     print(src, fmt, resolution)
     check_call(ffmpeg_video_cmd(cfg, src, dst, fmt, resolution, bitrate),
                shell=True)
+    write_hash(src, dst)
 
 
 def convert_image_wrap(args_array):
@@ -144,30 +146,34 @@ def dimensions(src):
 # http://stackoverflow.com/a/3431838/254187
 def hash_file(src):
     hash = hashlib.sha256()
-    with open(src, "rb") as f:
+    with open(src, 'rb') as f:
         for chunk in iter(lambda: f.read(4096), b""):
             hash.update(chunk)
     return hash.hexdigest()
 
 
-def hash_path_for_file(cfg, src):
-    return join(target_dir(cfg, src), '.src.sha256')
+def write_hash(src, dst):
+    with open(hash_path_for_dst(dst), 'w') as f:
+        f.write(hash_file(src))
 
 
-def src_is_dirty(cfg, src):
-    fresh_hash = hash_file(src)
+def hash_path_for_dst(dst):
+    path, name = split(dst)
+    return join(path, '.' + name + '.src.sha256')
+
+
+def is_dirty(src, dst):
     try:
-        with open(hash_path_for_file(cfg, src)) as f:
+        with open(hash_path_for_dst(dst)) as f:
             existing_hash = f.read()
     except FileNotFoundError:
         return True
-    return fresh_hash != existing_hash
+    return hash_file(src) != existing_hash
 
 
 def file_targets(cfg, src, is_video):
     targets = []
     name, ext = sanitary_name_and_ext(src)
-    dirty = src_is_dirty(cfg, src)
     width, height = dimensions(src)
     if is_video:
         for fmt in cfg.VIDEO_FORMATS:
@@ -178,7 +184,7 @@ def file_targets(cfg, src, is_video):
                 bitrate = cfg.VIDEO_BITRATES[i]
                 full = name + '-' + str(bitrate) + ext
                 dst = join(cfg.DST_DIR, target_dir(cfg, src), full)
-                if dirty or (not isfile(dst)):
+                if (not isfile(dst)) or is_dirty(src, dst):
                     targets.append((cfg, src, dst, fmt, resolution, bitrate))
     else:
         longest = max(width, height)
@@ -187,7 +193,7 @@ def file_targets(cfg, src, is_video):
                 continue
             full = name + '-' + str(resolution) + ext
             dst = join(cfg.DST_DIR, target_dir(cfg, src), full)
-            if dirty or (not isfile(dst)):
+            if (not isfile(dst)) or is_dirty(src, dst):
                 targets.append((src, dst, resolution))
     return targets
 
@@ -222,15 +228,6 @@ def run_img_jobs(cfg):
 def run_vid_jobs(cfg):
     with Pool() as pool:
         pool.map(convert_video_wrap, vid_jobs(cfg))
-
-
-def write_hashes(cfg):
-    for src in src_files(cfg):
-        try:
-            with open(hash_path_for_file(cfg, src), 'w') as f:
-                f.write(hash_file(src))
-        except FileNotFoundError:
-            pass
 
 
 if __name__ == '__main__':
