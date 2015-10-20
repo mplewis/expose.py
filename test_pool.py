@@ -6,8 +6,12 @@ import sure  # noqa
 config = Config(
     SRC_DIR='/tmp',
     DST_DIR='output',
-    SRC_PATTERN='*.jpg',
-    RESOLUTIONS=[3840, 2560, 1920, 1280, 1024, 640]
+    IMAGE_PATTERNS=('*.jpg'),
+    VIDEO_PATTERNS=('*.mp4'),
+    IMAGE_RESOLUTIONS=(3840, 2560, 1920, 1280, 1024, 640),
+    VIDEO_FORMATS=('h264', 'vp8'),
+    VIDEO_BITRATES=(40, 24, 12, 7, 4, 2),
+    VIDEO_VBR_MAX_RATIO=2,
 )
 
 
