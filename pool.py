@@ -1,9 +1,10 @@
 import hashlib
+import json
 from multiprocessing import Pool
 from os import getcwd, makedirs
 from os.path import join, basename, splitext, isfile, split
 from glob import glob
-from subprocess import check_call
+from subprocess import check_call, check_output
 from collections import namedtuple
 
 
@@ -76,18 +77,18 @@ def src_images(cfg):
     images = []
     for pattern in cfg.IMAGE_PATTERNS:
         images.extend(glob(join(cfg.SRC_DIR, pattern)))
-    return images[:3]
+    return images
 
 
 def src_videos(cfg):
     videos = []
     for pattern in cfg.VIDEO_PATTERNS:
         videos.extend(glob(join(cfg.SRC_DIR, pattern)))
-    return videos[:3]
+    return videos
 
 
 def src_files(cfg):
-    return src_images + src_videos
+    return src_images(cfg) + src_videos(cfg)
 
 
 def mkdir_for_dst(dst):
@@ -95,10 +96,9 @@ def mkdir_for_dst(dst):
     makedirs(out_dir, exist_ok=True)
 
 
-def convert_image(src, dst, size, quality):
-    print(sanitary_name(dst))
+def convert_image(src, dst, size):
     mkdir_for_dst(dst)
-    print(src, size)
+    print(sanitary_name(dst))
     check_call(['convert', src,
                 '-resize', '{}x{}>'.format(size, size),
                 dst])
@@ -133,6 +133,14 @@ def target_dir(cfg, src):
     return join(cfg.DST_DIR, sanitary_name(src))
 
 
+def dimensions(src):
+    cmd = ('ffprobe -v error -show_entries stream=width,height '
+           '-of default=noprint_wrappers=1 -of json "{}"'
+           .format(src))
+    data = json.loads(check_output(cmd, shell=True).decode())['streams'][0]
+    return data['width'], data['height']
+
+
 # http://stackoverflow.com/a/3431838/254187
 def hash_file(src):
     hash = hashlib.sha256()
@@ -160,17 +168,23 @@ def file_targets(cfg, src, is_video):
     targets = []
     name, ext = sanitary_name_and_ext(src)
     dirty = src_is_dirty(cfg, src)
+    width, height = dimensions(src)
     if is_video:
         for fmt in cfg.VIDEO_FORMATS:
             ext = VIDEO_FMT_EXTS[fmt]
             for i, resolution in enumerate(cfg.RESOLUTIONS):
+                if resolution > width:
+                    continue
                 bitrate = cfg.VIDEO_BITRATES[i]
                 full = name + '-' + str(bitrate) + ext
                 dst = join(cfg.DST_DIR, target_dir(cfg, src), full)
                 if dirty or (not isfile(dst)):
                     targets.append((cfg, src, dst, fmt, resolution, bitrate))
     else:
+        longest = max(width, height)
         for resolution in cfg.RESOLUTIONS:
+            if resolution > longest:
+                continue
             full = name + '-' + str(resolution) + ext
             dst = join(cfg.DST_DIR, target_dir(cfg, src), full)
             if dirty or (not isfile(dst)):
@@ -197,7 +211,7 @@ def vid_jobs(cfg):
     jobs = []
     for src in src_videos(cfg):
         jobs.extend(vid_targets(cfg, src))
-    return jobs[:6]
+    return jobs
 
 
 def run_img_jobs(cfg):
@@ -211,9 +225,12 @@ def run_vid_jobs(cfg):
 
 
 def write_hashes(cfg):
-    for src in src_images(cfg):
-        with open(hash_path_for_file(cfg, src), 'w') as f:
-            f.write(hash_file(src))
+    for src in src_files(cfg):
+        try:
+            with open(hash_path_for_file(cfg, src), 'w') as f:
+                f.write(hash_file(src))
+        except FileNotFoundError:
+            pass
 
 
 if __name__ == '__main__':
