@@ -1,0 +1,22 @@
+body {
+  margin: 0;
+}
+
+img {
+  display: block;
+  width: 100%;
+}
+
+#progress-outer {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 100%;
+}
+
+#progress-inner {
+  height: 4px;
+  width: 20%;
+  background-color: #61c3f8;
+  transition-duration: 0.5s;
+}

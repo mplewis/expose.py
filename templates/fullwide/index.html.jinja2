@@ -3,20 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <title>expose.py</title>
-  <style>
-    body {
-      margin: 0;
-    }
-    img {
-      display: block;
-      width: 100%;
-    }
-  </style>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <div id="progress-outer">
+    <div id="progress-inner"></div>
+  </div>
   {% for m in media %}
     {% if not m.is_video %}
-      <img class="lazyload" data-sizes="auto"
+      <img id="slide_{{ loop.index }}" class="lazyload" data-sizes="auto"
         data-srcset="
           {% for s in m.slices %}
             {{ m.name }}/{{ s.name }} {{ s.width }}w,
@@ -25,6 +20,15 @@
     {% endif %}
   {% endfor %}
   
-  <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/lazysizes/1.3.1/lazysizes.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lazysizes/1.3.1/lazysizes.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/scrollmonitor/1.0.12/scrollMonitor.min.js"></script>
+  <script>
+    var slides = [
+      {% for m in media %}
+        'slide_{{ loop.index }}',
+      {% endfor %}
+    ]
+  </script>
+  <script src="app.js"></script>
 </body>
 </html>
