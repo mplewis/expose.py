@@ -15,7 +15,7 @@ Options:
     --version       Show version
     --paths         Show script and working directories
     -v --verbose    Enable verbose log messages
-    -d --dry-run    Log all render actions to take place but don't render
+    -d --dry-run    Log all actions but don't execute them
     -s --site-only  Skip rendering and just build HTML
 """
 VERSION = 'expose.py 0.0.1'
@@ -34,9 +34,10 @@ from glob import glob
 from subprocess import check_call, check_output
 from collections import namedtuple
 from sys import exit
+from shutil import copy
 
 SCRIPT_DIR = dirname(realpath(__file__))
-TEMPLATE_DIR = join(SCRIPT_DIR, 'templates')
+TEMPLATES_DIR = join(SCRIPT_DIR, 'templates')
 
 VIDEO_FMT_COMMANDS = {
     'h264': (
@@ -370,6 +371,7 @@ def run_vid_jobs(jobs):
 
 
 def web_media_from_output(rendered_dir):
+    l.info('Gathering rendered media from {}'.format(rendered_dir))
     media_globs = ['*.mp4', '*.jpg', '*.webm']
     media_dirs = glob(join(rendered_dir, '*'))
     all_media = []
@@ -380,6 +382,34 @@ def web_media_from_output(rendered_dir):
         wm = WebMedia(mp, media_paths)
         all_media.append(wm)
     return all_media
+
+
+def template_dir(cfg):
+    return join(TEMPLATES_DIR, cfg.TEMPLATE)
+
+
+def render_html_from_media(cfg, media, dry_run):
+    l.info('Rendering HTML from {} media items'.format(len(media)))
+    env = Environment(loader=FileSystemLoader(template_dir(cfg)))
+    template = env.get_template('index.html.jinja2')
+    rendered = template.render({'media': media})
+    html_out = join(cfg.DST_DIR, 'index.html')
+    if dry_run:
+        l.info('Dry run: render HTML to {}'.format(html_out))
+    else:
+        with open(html_out, 'w') as f:
+            f.write(rendered)
+
+
+def copy_theme_static_files(cfg, dry_run):
+    l.info('Copying static files for theme')
+    static_files = [f for f in glob(join(template_dir(cfg), '*'))
+                    if not f.endswith('.jinja2')]
+    for f in static_files:
+        if dry_run:
+            l.info('Dry run: copy {} to {}'.format(f, cfg.DST_DIR))
+        else:
+            copy(f, cfg.DST_DIR)
 
 
 if __name__ == '__main__':
@@ -394,13 +424,13 @@ if __name__ == '__main__':
     if args['--paths']:
         l.info('Working directory:   {}'.format(getcwd()))
         l.info('expose.py directory: {}'.format(SCRIPT_DIR))
-        l.info('Template directory:  {}'.format(TEMPLATE_DIR))
+        l.info('Template directory:  {}'.format(TEMPLATES_DIR))
         exit(0)
 
     config = Config(
         SRC_DIR=getcwd(),
         DST_DIR=join(getcwd(), '_site'),
-        TEMPLATE='fullwide.jinja2',
+        TEMPLATE='fullwide',
         IMAGE_PATTERNS=['*.jpg'],
         VIDEO_PATTERNS=['*.mp4'],
         RESOLUTIONS=[3840, 2560, 1920, 1280, 1024, 640],
@@ -409,21 +439,16 @@ if __name__ == '__main__':
         VIDEO_VBR_MAX_RATIO=2,
     )
 
+    dry_run = args['--dry-run']
+
     if args['--site-only']:
         l.info('Skipping render phase')
     else:
-        dry_run = args['--dry-run']
         ij = img_jobs(config, dry_run)
         vj = vid_jobs(config, dry_run)
         run_img_jobs(ij)
         run_vid_jobs(vj)
 
-    l.info('Gathering rendered media from {}'.format(config.DST_DIR))
     media = web_media_from_output(config.DST_DIR)
-
-    l.info('Rendering HTML from {} media items'.format(len(media)))
-
-    env = Environment(loader=FileSystemLoader(TEMPLATE_DIR))
-    template = env.get_template(config.TEMPLATE)
-    rendered = template.render({'media': media})
-    print(rendered)
+    render_html_from_media(config, media, dry_run)
+    copy_theme_static_files(config, dry_run)
