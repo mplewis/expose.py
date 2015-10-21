@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>expose.py</title>
+</head>
+<body>
+  {% for m in media %}
+    {% if m.is_video %}
+      Video:
+    {% else %}
+      Image:
+    {% endif %}
+    {{ m.name }}
+  {% endfor %}
+</body>
+</html>

@@ -5,17 +5,18 @@ process photos and videos into a static site photojournal
 https://github.com/mplewis/expose.py
 
 Usage:
-    expose.py [(-d | --dry-run)] [(-v | --verbose)]
+    expose.py [(-v | --verbose)] [(-d | --dry-run)] [(-s | --site-only)]
     expose.py (-h | --help)
     expose.py --version
     expose.py --paths
 
 Options:
-    -h --help     Show this screen
-    --version     Show version
-    --paths       Show script and working directories
-    -d --dry-run  Don't process any files, just list them
-    -v --verbose  Enable verbose log messages
+    -h --help       Show this screen
+    --version       Show version
+    --paths         Show script and working directories
+    -v --verbose    Enable verbose log messages
+    -d --dry-run    Log all render actions to take place but don't render
+    -s --site-only  Skip rendering and just build HTML
 """
 VERSION = 'expose.py 0.0.1'
 
@@ -35,7 +36,7 @@ from collections import namedtuple
 from sys import exit
 
 SCRIPT_DIR = dirname(realpath(__file__))
-TEMPLATE_DIR = join(SCRIPT_DIR, 'themes')
+TEMPLATE_DIR = join(SCRIPT_DIR, 'templates')
 
 VIDEO_FMT_COMMANDS = {
     'h264': (
@@ -81,6 +82,7 @@ VIDEO_FMT_EXTS = {
 
 Config = namedtuple('Config', ('SRC_DIR '
                                'DST_DIR '
+                               'TEMPLATE '
                                'IMAGE_PATTERNS '
                                'VIDEO_PATTERNS '
                                'RESOLUTIONS '
@@ -91,6 +93,26 @@ Config = namedtuple('Config', ('SRC_DIR '
 ImageJob = namedtuple('ImageJob', ('src dst size dry_run'))
 VideoJob = namedtuple('VideoJob', ('cfg src dst format resolution bitrate '
                                    'dry_run'))
+
+
+class WebMedia:
+    def __init__(self, directory, media_items):
+        self.directory = directory
+        _, self.name = split(directory)
+        self.media_items = media_items
+
+    def __repr__(self):
+        media_type = 'image'
+        if self.is_video:
+            media_type = 'video'
+        return '<WebMedia: {} ({})>'.format(self.name, media_type)
+
+    @property
+    def is_video(self):
+        for path in self.media_items:
+            if path.endswith('.jpg'):
+                return False
+        return True
 
 
 def src_images(cfg):
@@ -347,6 +369,19 @@ def run_vid_jobs(jobs):
     run_jobs(jobs, True)
 
 
+def web_media_from_output(rendered_dir):
+    media_globs = ['*.mp4', '*.jpg', '*.webm']
+    media_dirs = glob(join(rendered_dir, '*'))
+    all_media = []
+    for mp in media_dirs:
+        media_paths = []
+        for ext in media_globs:
+            media_paths.extend(glob(join(mp, ext)))
+        wm = WebMedia(mp, media_paths)
+        all_media.append(wm)
+    return all_media
+
+
 if __name__ == '__main__':
 
     args = docopt(__doc__, version=VERSION)
@@ -365,6 +400,7 @@ if __name__ == '__main__':
     config = Config(
         SRC_DIR=getcwd(),
         DST_DIR=join(getcwd(), '_site'),
+        TEMPLATE='fullwide.jinja2',
         IMAGE_PATTERNS=['*.jpg'],
         VIDEO_PATTERNS=['*.mp4'],
         RESOLUTIONS=[3840, 2560, 1920, 1280, 1024, 640],
@@ -373,8 +409,21 @@ if __name__ == '__main__':
         VIDEO_VBR_MAX_RATIO=2,
     )
 
-    dry_run = args['--dry-run']
-    ij = img_jobs(config, dry_run)
-    vj = vid_jobs(config, dry_run)
-    run_img_jobs(ij)
-    run_vid_jobs(vj)
+    if args['--site-only']:
+        l.info('Skipping render phase')
+    else:
+        dry_run = args['--dry-run']
+        ij = img_jobs(config, dry_run)
+        vj = vid_jobs(config, dry_run)
+        run_img_jobs(ij)
+        run_vid_jobs(vj)
+
+    l.info('Gathering rendered media from {}'.format(config.DST_DIR))
+    media = web_media_from_output(config.DST_DIR)
+
+    l.info('Rendering HTML from {} media items'.format(len(media)))
+
+    env = Environment(loader=FileSystemLoader(TEMPLATE_DIR))
+    template = env.get_template(config.TEMPLATE)
+    rendered = template.render({'media': media})
+    print(rendered)
