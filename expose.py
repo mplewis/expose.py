@@ -112,7 +112,7 @@ class WebMediaSlice:
 
     @property
     def is_video(self):
-        return self.source.endswith('.jpg')
+        return not self.source.endswith('.jpg')
 
 
 class WebMedia:
@@ -131,8 +131,8 @@ class WebMedia:
     def is_video(self):
         for s in self.slices:
             if s.is_video:
-                return False
-        return True
+                return True
+        return False
 
 
 def src_images(cfg):
