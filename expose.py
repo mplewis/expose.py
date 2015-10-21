@@ -5,13 +5,16 @@ process photos and videos into a static site photojournal
 https://github.com/mplewis/expose.py
 
 Usage:
-    expose.py [--dry-run] [(-v | --verbose)]
+    expose.py [(-d | --dry-run)] [(-v | --verbose)]
+    expose.py (-h | --help)
     expose.py --version
+    expose.py --paths
 
 Options:
-    -h --help     Show this screen.
-    --version     Show version.
-    --dry-run     Don't process any files, just list them.
+    -h --help     Show this screen
+    --version     Show version
+    --paths       Show script and working directories
+    -d --dry-run  Don't process any files, just list them
     -v --verbose  Enable verbose log messages
 """
 VERSION = 'expose.py 0.0.1'
@@ -29,6 +32,7 @@ from os.path import join, basename, splitext, isfile, split, dirname, realpath
 from glob import glob
 from subprocess import check_call, check_output
 from collections import namedtuple
+from sys import exit
 
 SCRIPT_DIR = dirname(realpath(__file__))
 TEMPLATE_DIR = join(SCRIPT_DIR, 'themes')
@@ -89,7 +93,6 @@ VideoJob = namedtuple('VideoJob', ('cfg src dst format resolution bitrate '
                                    'dry_run'))
 
 
-
 def src_images(cfg):
     images = []
     for pattern in cfg.IMAGE_PATTERNS:
@@ -111,7 +114,7 @@ def src_files(cfg):
 def mkdir_for_dst(dst, dry_run):
     out_dir, _ = split(dst)
     if dry_run:
-        print('Dry run: makedirs {}'.format(out_dir))
+        l.info('Dry run: makedirs {}'.format(out_dir))
     else:
         makedirs(out_dir, exist_ok=True)
 
@@ -122,7 +125,7 @@ def convert_image(job):
            '-resize', '{}x{}>'.format(job.size, job.size),
            job.dst]
     if job.dry_run:
-        print('Dry run: {}'.format(' '.join(cmd)))
+        l.info('Dry run: {}'.format(' '.join(cmd)))
     else:
         check_call(cmd)
         write_hash(job.src, job.dst)
@@ -142,7 +145,7 @@ def convert_video(job):
     cmd_template = VIDEO_FMT_COMMANDS[job.format]
     cmd = cmd_template.format(**options)
     if job.dry_run:
-        print('Dry run: {}'.format(cmd))
+        l.info('Dry run: {}'.format(cmd))
     else:
         check_call(cmd, shell=True)
         write_hash(job.src, job.dst)
@@ -349,6 +352,17 @@ if __name__ == '__main__':
 
     args = docopt(__doc__, version=VERSION)
 
+    log_level = l.INFO
+    if args['--verbose']:
+        log_level = l.DEBUG
+    l.basicConfig(format='%(message)s', level=log_level)
+
+    if args['--paths']:
+        l.info('Working directory:   {}'.format(getcwd()))
+        l.info('expose.py directory: {}'.format(SCRIPT_DIR))
+        l.info('Template directory:  {}'.format(TEMPLATE_DIR))
+        exit(0)
+
     config = Config(
         SRC_DIR='/Users/mplewis/tmp/media',
         DST_DIR=join(getcwd(), '_site'),
@@ -359,12 +373,6 @@ if __name__ == '__main__':
         VIDEO_FORMATS=['h264', 'webm'],
         VIDEO_VBR_MAX_RATIO=2,
     )
-
-    log_level = l.INFO
-    if args['--verbose']:
-        log_level = l.DEBUG
-
-    l.basicConfig(format='%(message)s', level=log_level)
 
     dry_run = args['--dry-run']
     run_img_jobs(img_jobs(config, dry_run))
