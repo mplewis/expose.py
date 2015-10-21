@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 expose.py
 process photos and videos into a static site photojournal
@@ -17,17 +18,20 @@ VERSION = 'expose.py 0.0.1'
 
 import pyprind
 from docopt import docopt
+from jinja2 import Environment, FileSystemLoader
 
 import hashlib
 import json
 import logging as l
 from multiprocessing import Pool, Manager
 from os import getcwd, makedirs
-from os.path import join, basename, splitext, isfile, split
+from os.path import join, basename, splitext, isfile, split, dirname, realpath
 from glob import glob
 from subprocess import check_call, check_output
 from collections import namedtuple
 
+SCRIPT_DIR = dirname(realpath(__file__))
+TEMPLATE_DIR = join(SCRIPT_DIR, 'themes')
 
 VIDEO_FMT_COMMANDS = {
     'h264': (
@@ -80,18 +84,10 @@ Config = namedtuple('Config', ('SRC_DIR '
                                'VIDEO_BITRATES '
                                'VIDEO_VBR_MAX_RATIO'))
 
+ImageJob = namedtuple('ImageJob', ('src dst size dry_run'))
+VideoJob = namedtuple('VideoJob', ('cfg src dst format resolution bitrate '
+                                   'dry_run'))
 
-def ffmpeg_video_cmd(cfg, src, dst, fmt, resolution, bitrate):
-    options = dict(
-        src=src,
-        dst=dst,
-        resolution=resolution,
-        bitrate=bitrate,
-        max_bitrate=bitrate * cfg.VIDEO_VBR_MAX_RATIO,
-        threads=2,
-        h264_encode_speed='medium',
-    )
-    return VIDEO_FMT_COMMANDS[fmt].format(**options)
 
 
 def src_images(cfg):
@@ -112,35 +108,56 @@ def src_files(cfg):
     return src_images(cfg) + src_videos(cfg)
 
 
-def mkdir_for_dst(dst):
+def mkdir_for_dst(dst, dry_run):
     out_dir, _ = split(dst)
-    makedirs(out_dir, exist_ok=True)
+    if dry_run:
+        print('Dry run: makedirs {}'.format(out_dir))
+    else:
+        makedirs(out_dir, exist_ok=True)
 
 
-def convert_image(src, dst, size):
-    mkdir_for_dst(dst)
-    check_call(['convert', src,
-                '-resize', '{}x{}>'.format(size, size),
-                dst])
-    write_hash(src, dst)
+def convert_image(job):
+    mkdir_for_dst(job.dst, dry_run)
+    cmd = ['convert', job.src,
+           '-resize', '{}x{}>'.format(job.size, job.size),
+           job.dst]
+    if job.dry_run:
+        print('Dry run: {}'.format(' '.join(cmd)))
+    else:
+        check_call(cmd)
+        write_hash(job.src, job.dst)
 
 
-def convert_video(cfg, src, dst, fmt, resolution, bitrate):
-    mkdir_for_dst(dst)
-    check_call(ffmpeg_video_cmd(cfg, src, dst, fmt, resolution, bitrate),
-               shell=True)
-    write_hash(src, dst)
+def convert_video(job):
+    mkdir_for_dst(job.dst, dry_run)
+    options = dict(
+        src=job.src,
+        dst=job.dst,
+        resolution=job.resolution,
+        bitrate=job.bitrate,
+        max_bitrate=job.bitrate * job.cfg.VIDEO_VBR_MAX_RATIO,
+        threads=2,
+        h264_encode_speed='medium',
+    )
+    cmd_template = VIDEO_FMT_COMMANDS[job.format]
+    cmd = cmd_template.format(**options)
+    if job.dry_run:
+        print('Dry run: {}'.format(cmd))
+    else:
+        check_call(cmd, shell=True)
+        write_hash(job.src, job.dst)
 
 
-def convert_image_wrap(queue_and_args):
-    queue, args = queue_and_args
-    convert_image(*args)
+def convert_image_wrap(queue_and_job):
+    queue, job = queue_and_job
+    convert_image(job)
     queue.put(True)
 
 
-def convert_video_wrap(queue_and_args):
-    queue, args = queue_and_args
-    convert_video(*args)
+def convert_video_wrap(queue_and_job):
+    queue, job = queue_and_job
+    l.debug(job)
+    convert_video(job)
     queue.put(True)
 
 
@@ -194,7 +211,7 @@ def is_dirty(src, dst):
     return hash_file(src) != existing_hash
 
 
-def file_targets(cfg, src, is_video):
+def file_targets(cfg, src, is_video, dry_run):
     targets = []
     skipped = 0
     name, ext = sanitary_name_and_ext(src)
@@ -217,7 +234,9 @@ def file_targets(cfg, src, is_video):
                         reason = 'dirty'
                     l.debug('Added target: {} @ {}px/{}M ({})'
                             .format(name, resolution, bitrate, reason))
-                    targets.append((cfg, src, dst, fmt, resolution, bitrate))
+                    job = VideoJob(cfg, src, dst, fmt, resolution, bitrate,
+                                   dry_run)
+                    targets.append(job)
                 else:
                     l.debug('Skipping {} @ {}: file exists and is cached'
                             .format(name, resolution))
@@ -238,7 +257,8 @@ def file_targets(cfg, src, is_video):
                     reason = 'dirty'
                 l.debug('Added target: {} @ {}px ({})'
                         .format(name, resolution, reason))
-                targets.append((src, dst, resolution))
+                job = ImageJob(src, dst, resolution, dry_run)
+                targets.append(job)
             else:
                 l.debug('Skipping {} @ {}: file exists and is cached'
                         .format(name, resolution))
@@ -246,38 +266,52 @@ def file_targets(cfg, src, is_video):
     return targets, skipped
 
 
-def img_targets(cfg, src):
-    return file_targets(cfg, src, False)
+def img_targets(cfg, src, dry_run):
+    return file_targets(cfg, src, False, dry_run)
 
 
-def vid_targets(cfg, src):
-    return file_targets(cfg, src, True)
+def vid_targets(cfg, src, dry_run):
+    return file_targets(cfg, src, True, dry_run)
 
 
-def img_jobs(cfg):
-    l.info('Generating image jobs...')
+def media_jobs(cfg, dry_run, is_video):
+    if is_video:
+        media_lc = 'video'
+        media_uc = 'Video'
+        src_media = src_videos
+        media_targets = vid_targets
+    else:
+        media_lc = 'image'
+        media_uc = 'Image'
+        src_media = src_images
+        media_targets = img_targets
+
+    l.info('Generating {} jobs...'.format(media_lc))
     jobs = []
     skipped = 0
-    for src in pyprind.prog_bar(src_images(cfg)):
-        j, s = img_targets(cfg, src)
+
+    si = src_media(cfg)
+    if not si:
+        l.debug('No source {}s'.format(media_lc))
+        return
+
+    for src in pyprind.prog_bar(si):
+        j, s = media_targets(cfg, src, dry_run)
         jobs.extend(j)
         skipped += s
-    l.info('Image jobs: running {}, skipped {}, total {}'
-           .format(len(jobs), skipped, len(jobs) + skipped))
+
+    l.info('{} jobs: running {}, skipped {}, total {}'
+           .format(media_uc, len(jobs), skipped, len(jobs) + skipped))
+
     return jobs
 
 
-def vid_jobs(cfg):
-    l.info('Generating video jobs...')
-    jobs = []
-    skipped = 0
-    for src in pyprind.prog_bar(src_videos(cfg)):
-        j, s = vid_targets(cfg, src)
-        jobs.extend(j)
-        skipped += s
-    l.info('Video jobs: running {}, skipped {}, total {}'
-           .format(len(jobs), skipped, len(jobs) + skipped))
-    return jobs
+def img_jobs(cfg, dry_run):
+    return media_jobs(cfg, dry_run, False)
+
+
+def vid_jobs(cfg, dry_run):
+    return media_jobs(cfg, dry_run, True)
 
 
 def run_jobs(jobs, is_video):
@@ -316,14 +350,13 @@ if __name__ == '__main__':
     args = docopt(__doc__, version=VERSION)
 
     config = Config(
-        SRC_DIR=('/Users/mplewis/Dropbox (Personal)/projectsync/'
-                 'images/BWCA 2015'),
-        DST_DIR=join(getcwd(), 'output'),
-        IMAGE_PATTERNS=('*.jpg',),
-        VIDEO_PATTERNS=('*.mp4',),
-        RESOLUTIONS=(3840, 2560, 1920, 1280, 1024, 640),
-        VIDEO_BITRATES=(40, 24, 12, 7, 4, 2),
-        VIDEO_FORMATS=('h264', 'webm'),
+        SRC_DIR='/Users/mplewis/tmp/media',
+        DST_DIR=join(getcwd(), '_site'),
+        IMAGE_PATTERNS=['*.jpg'],
+        VIDEO_PATTERNS=['*.mp4'],
+        RESOLUTIONS=[3840, 2560, 1920, 1280, 1024, 640],
+        VIDEO_BITRATES=[40, 24, 12, 7, 4, 2],
+        VIDEO_FORMATS=['h264', 'webm'],
         VIDEO_VBR_MAX_RATIO=2,
     )
 
@@ -333,15 +366,6 @@ if __name__ == '__main__':
 
     l.basicConfig(format='%(message)s', level=log_level)
 
-    ij = img_jobs(config)
-    vj = vid_jobs(config)
-
-    if args['--dry-run']:
-        for job in ij:
-            print(sanitary_name(job[1]))
-        for job in vj:
-            print(sanitary_name(job[2]))
-
-    else:
-        run_img_jobs(ij)
-        run_vid_jobs(vj)
+    dry_run = args['--dry-run']
+    run_img_jobs(img_jobs(config, dry_run))
+    run_vid_jobs(vid_jobs(config, dry_run))
