@@ -190,6 +190,21 @@ def convert_video(job):
         l.info('Dry run: {}'.format(cmd))
     else:
         check_call(cmd, shell=True)
+
+    name, ext = splitext(job.dst)
+    poster_dst = name + '.jpg'
+
+    # One of the other video targets may have already made the poster for this
+    # video resolution
+    if not isfile(poster_dst):
+        cmd = ('ffmpeg -loglevel error -i "{}" -vframes 1 -f image2 "{}"'
+               .format(job.dst, poster_dst))
+        if job.dry_run:
+            l.info('Dry run: {}'.format(cmd))
+        else:
+            check_call(cmd, shell=True)
+
+    if not job.dry_run:
         write_hash(job.src, job.dst)
 
 
