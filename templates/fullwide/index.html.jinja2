@@ -3,15 +3,28 @@
 <head>
   <meta charset="UTF-8">
   <title>expose.py</title>
+  <style>
+    body {
+      margin: 0;
+    }
+    img {
+      display: block;
+      width: 100%;
+    }
+  </style>
 </head>
 <body>
   {% for m in media %}
-    {% if m.is_video %}
-      Video:
-    {% else %}
-      Image:
+    {% if not m.is_video %}
+      <img class="lazyload" data-sizes="auto"
+        data-srcset="
+          {% for s in m.slices %}
+            {{ m.name }}/{{ s.name }} {{ s.width }}w,
+          {% endfor %}
+        ">
     {% endif %}
-    {{ m.name }}
   {% endfor %}
+  
+  <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/lazysizes/1.3.1/lazysizes.min.js"></script>
 </body>
 </html>
