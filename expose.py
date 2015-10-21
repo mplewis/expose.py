@@ -26,10 +26,12 @@ from jinja2 import Environment, FileSystemLoader
 
 import hashlib
 import json
+import re
 import logging as l
 from multiprocessing import Pool, Manager
 from os import getcwd, makedirs
-from os.path import join, basename, splitext, isfile, split, dirname, realpath
+from os.path import (join, basename, splitext, isfile, split, dirname,
+                     realpath, isdir)
 from glob import glob
 from subprocess import check_call, check_output
 from collections import namedtuple
@@ -96,11 +98,28 @@ VideoJob = namedtuple('VideoJob', ('cfg src dst format resolution bitrate '
                                    'dry_run'))
 
 
+class WebMediaSlice:
+    def __init__(self, source):
+        self.source = source
+        _, self.name = split(source)
+        self.width = int(re.match(r'^.+-(\d+)\..+$', source).groups()[0])
+
+    def __repr__(self):
+        media_type = 'image'
+        if self.is_video:
+            media_type = 'video'
+        return '<WebMediaSlice: {}w ({})>'.format(self.width, media_type)
+
+    @property
+    def is_video(self):
+        return self.source.endswith('.jpg')
+
+
 class WebMedia:
-    def __init__(self, directory, media_items):
+    def __init__(self, directory, sources):
         self.directory = directory
         _, self.name = split(directory)
-        self.media_items = media_items
+        self.slices = [WebMediaSlice(source) for source in sources]
 
     def __repr__(self):
         media_type = 'image'
@@ -110,8 +129,8 @@ class WebMedia:
 
     @property
     def is_video(self):
-        for path in self.media_items:
-            if path.endswith('.jpg'):
+        for s in self.slices:
+            if s.is_video:
                 return False
         return True
 
@@ -251,7 +270,7 @@ def file_targets(cfg, src, is_video, dry_run):
                             .format(name, resolution, width))
                     continue
                 bitrate = cfg.VIDEO_BITRATES[i]
-                full = name + '-' + str(bitrate) + ext
+                full = name + '-' + str(resolution) + ext
                 dst = join(cfg.DST_DIR, target_dir(cfg, src), full)
                 if (not isfile(dst)) or is_dirty(src, dst):
                     if not isfile(dst):
@@ -374,6 +393,10 @@ def web_media_from_output(rendered_dir):
     l.info('Gathering rendered media from {}'.format(rendered_dir))
     media_globs = ['*.mp4', '*.jpg', '*.webm']
     media_dirs = glob(join(rendered_dir, '*'))
+
+    # Filter files out - static files may be lying around from the last build
+    media_dirs = [d for d in media_dirs if isdir(d)]
+
     all_media = []
     for mp in media_dirs:
         media_paths = []
