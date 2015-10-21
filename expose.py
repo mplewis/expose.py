@@ -122,7 +122,7 @@ def mkdir_for_dst(dst, dry_run):
 def convert_image(job):
     mkdir_for_dst(job.dst, dry_run)
     cmd = ['convert', job.src,
-           '-resize', '{}x{}>'.format(job.size, job.size),
+           '-resize', '{}x>'.format(job.size),
            job.dst]
     if job.dry_run:
         l.info('Dry run: {}'.format(' '.join(cmd)))
@@ -245,11 +245,10 @@ def file_targets(cfg, src, is_video, dry_run):
                             .format(name, resolution))
                     skipped += 1
     else:
-        longest = max(width, height)
         for resolution in cfg.RESOLUTIONS:
-            if resolution > longest:
-                l.debug('Skipping {} @ {}: longest side {} < target resolution'
-                        .format(name, resolution, longest))
+            if resolution > width:
+                l.debug('Skipping {} @ {}: width {} < target resolution'
+                        .format(name, resolution, width))
                 continue
             full = name + '-' + str(resolution) + ext
             dst = join(cfg.DST_DIR, target_dir(cfg, src), full)
@@ -364,7 +363,7 @@ if __name__ == '__main__':
         exit(0)
 
     config = Config(
-        SRC_DIR='/Users/mplewis/tmp/media',
+        SRC_DIR=getcwd(),
         DST_DIR=join(getcwd(), '_site'),
         IMAGE_PATTERNS=['*.jpg'],
         VIDEO_PATTERNS=['*.mp4'],
@@ -375,5 +374,7 @@ if __name__ == '__main__':
     )
 
     dry_run = args['--dry-run']
-    run_img_jobs(img_jobs(config, dry_run))
-    run_vid_jobs(vid_jobs(config, dry_run))
+    ij = img_jobs(config, dry_run)
+    vj = vid_jobs(config, dry_run)
+    run_img_jobs(ij)
+    run_vid_jobs(vj)
