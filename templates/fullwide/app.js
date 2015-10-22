@@ -77,7 +77,7 @@ document.addEventListener('lazybeforeunveil', function(e) {
 
 // Request metadata and add it to the description elements
 reqwest('metadata.yml').then(function(resp) {
-  var metadata = jsyaml.safeLoad(resp)
+  var metadata = jsyaml.safeLoad(resp.responseText)
   _.forOwn(metadata.slides, function(val, key) {
     var id = slidesById[key] + '_desc'
     var elem = document.getElementById(id)
