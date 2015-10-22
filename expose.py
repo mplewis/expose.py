@@ -450,6 +450,23 @@ def copy_theme_static_files(cfg, dry_run):
             copy(f, cfg.DST_DIR)
 
 
+def copy_metadata(cfg, dry_run):
+    metadata = join(cfg.SRC_DIR, 'metadata.yml')
+    if isfile(metadata):
+        if dry_run:
+            l.info('Dry run: Copying metadata.yml')
+        else:
+            l.info('Copying metadata.yml')
+            copy(metadata, cfg.DST_DIR)
+    else:
+        if dry_run:
+            l.info('Dry run: No metadata.yml found; creating empty file')
+        else:
+            l.info('No metadata.yml found; creating empty file')
+            with open(metadata, 'w') as f:
+                f.write('')
+
+
 if __name__ == '__main__':
 
     args = docopt(__doc__, version=VERSION)
@@ -490,3 +507,4 @@ if __name__ == '__main__':
     media = web_media_from_output(config.DST_DIR)
     render_html_from_media(config, media, dry_run)
     copy_theme_static_files(config, dry_run)
+    copy_metadata(config, dry_run)

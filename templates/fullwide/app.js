@@ -16,10 +16,9 @@ function trueWidth() {
   return browserWidth() * pixelRatio()
 }
 
-var total = slides.length
-
 function scrolledTo(pos) {
   var progress = document.getElementById('progress-inner')
+  var total = slides.length
   var width = pos * 100 / total + '%'
   progress.style.width = width
 }
@@ -38,7 +37,9 @@ document.addEventListener('lazybeforeunveil', function(e) {
   // Lazy load responsive videos right before they're unveiled by lazysizes
   // This doesn't load larger versions when the window resizes
   var elem = e.target
-  var id = elem.id
+  // the _content div is lazy loaded but we need the original slide id
+  // to look up the source content
+  var id = elem.id.replace('_content', '')
   var sources = videoSources[id]
   if (!sources) return  // no video sources = not a video
 
@@ -61,7 +62,6 @@ document.addEventListener('lazybeforeunveil', function(e) {
   var toPresent = (sources
                    .filter(function(pair) { return pair[0] === width })
                    .map(function(pair) { return pair[1] }))
-  console.log(toPresent)
 
   var html = ''
   toPresent.forEach(function(src) {
@@ -69,6 +69,28 @@ document.addEventListener('lazybeforeunveil', function(e) {
   })
   elem.innerHTML = html
 
+  // add poster image while video loads
+  var poster = toPresent[0].split('.')[0] + '.jpg'
+  elem.setAttribute('poster', poster)
+
+})
+
+// Request metadata and add it to the description elements
+reqwest('metadata.yml').then(function(resp) {
+  var metadata = jsyaml.safeLoad(resp)
+  _.forOwn(metadata.slides, function(val, key) {
+    var id = slidesById[key] + '_desc'
+    var elem = document.getElementById(id)
+    var content = val.content
+    var style = val.style
+    if (content) elem.innerHTML = markdown.toHTML(content)
+    if (style) elem.style.cssText = style
+  })
 })
 
 scrolledTo(1)
+
+$('.slide-desc').flowtype({
+  minFont: 12,
+  maxFont: 32
+})

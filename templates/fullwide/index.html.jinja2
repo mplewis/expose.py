@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>expose.py</title>
+  <link href='https://fonts.googleapis.com/css?family=Playfair+Display' rel='stylesheet' type='text/css'>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -10,27 +11,41 @@
     <div id="progress-inner"></div>
   </div>
   {% for m in media %}
-    {% if m.is_video %}
-      <video id="slide_{{ loop.index }}" class="lazyload" autoplay="autoplay" loop="loop" muted></video>
-    {% else %}
-      <img id="slide_{{ loop.index }}" class="lazyload" data-sizes="auto"
-        data-srcset="
-          {% for s in m.slices %}
-            {{ m.name }}/{{ s.name }} {{ s.width }}w,
-          {% endfor %}
-        ">
-    {% endif %}
+    <div id="slide_{{ loop.index }}" class="slide">
+      <span id="slide_{{ loop.index }}_desc" class="slide-desc"></span>
+      {% if m.is_video %}
+        <video id="slide_{{ loop.index }}_content" class="lazyload slide-content" autoplay="autoplay" loop="loop" muted></video>
+      {% else %}
+        <img id="slide_{{ loop.index }}_content" class="lazyload slide-content" data-sizes="auto"
+          data-srcset="
+            {% for s in m.slices %}
+              {{ m.name }}/{{ s.name }} {{ s.width }}w,
+            {% endfor %}
+          ">
+      {% endif %}
+    </div>
   {% endfor %}
   
   <script src="https://cdnjs.cloudflare.com/ajax/libs/lazysizes/1.3.1/lazysizes.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/scrollmonitor/1.0.12/scrollMonitor.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/3.10.1/lodash.min.js"></script>
+  <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/3.4.3/js-yaml.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/reqwest/2.0.5/reqwest.min.js"></script>
+  <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/markdown.js/0.5.0/markdown.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/2.1.4/jquery.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Flowtype.js/1.1.0/flowtype.min.js"></script>
+
   <script>
     var slides = [
       {% for m in media %}
         'slide_{{ loop.index }}',
       {% endfor %}
     ]
+    var slidesById = {
+      {% for m in media %}
+        '{{ m.name }}': 'slide_{{ loop.index }}',
+      {% endfor %}
+    }
     var videoSources = {
       {% for m in media %}
         {% if m.is_video %}
@@ -43,6 +58,8 @@
       {% endfor %}
     }
   </script>
+
   <script src="app.js"></script>
+
 </body>
 </html>
