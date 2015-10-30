@@ -26,6 +26,7 @@ from jinja2 import Environment, FileSystemLoader
 
 import hashlib
 import json
+import yaml
 import re
 import logging as l
 from multiprocessing import Pool, Manager
@@ -34,7 +35,7 @@ from os.path import (join, basename, splitext, isfile, split, dirname,
                      realpath, isdir)
 from glob import glob
 from subprocess import check_call, check_output
-from collections import namedtuple
+from collections import (namedtuple, OrderedDict)
 from sys import exit
 from shutil import copy
 
@@ -449,6 +450,27 @@ def copy_theme_static_files(cfg, dry_run):
         else:
             copy(f, cfg.DST_DIR)
 
+# http://stackoverflow.com/a/21912744
+def ordered_dump(data, stream=None, Dumper=yaml.Dumper, **kwds):
+    class OrderedDumper(Dumper):
+        pass
+    def _dict_representer(dumper, data):
+        return dumper.represent_mapping(
+            yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+            data.items())
+    OrderedDumper.add_representer(OrderedDict, _dict_representer)
+    return yaml.dump(data, stream, OrderedDumper, **kwds)
+
+def generate_metadata_template(cfg):
+    slides = {'slides': {}}
+    for pattern in cfg.IMAGE_PATTERNS + cfg.VIDEO_PATTERNS:
+        for f in glob(pattern):
+            slide = sanitary_name(f)
+            slides['slides'][slide] = {
+                'content': '',
+                'style': ''
+            }
+    return ordered_dump(slides, default_flow_style=False)
 
 def copy_metadata(cfg, dry_run):
     metadata = join(cfg.SRC_DIR, 'metadata.yml')
@@ -459,12 +481,14 @@ def copy_metadata(cfg, dry_run):
             l.info('Copying metadata.yml')
             copy(metadata, cfg.DST_DIR)
     else:
+        metadata_template = generate_metadata_template(cfg)
         if dry_run:
-            l.info('Dry run: No metadata.yml found; creating empty file')
+            l.info('Dry run: No metadata.yml found; writing template:\n{}'
+                .format(metadata_template))
         else:
-            l.info('No metadata.yml found; creating empty file')
+            l.info('No metadata.yml found; writing template')
             with open(metadata, 'w') as f:
-                f.write('')
+                f.write(metadata_template)
 
 
 if __name__ == '__main__':
