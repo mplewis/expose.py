@@ -2,6 +2,12 @@
 
 A static site generator for photo diaries, inspired by [Expose](https://github.com/Jack000/Expose).
 
+# Example
+
+[:camera: **Boundary Waters :sunrise: 2015 Trip :tent: With Friends** :rowboat:](http://mplewis.com/bwca_2015/)
+
+Click here! I made this photo diary with expose.py.
+
 # Why?
 
 I like what Expose does. But encoding photos and videos takes a long time, and Expose doesn't support:
