@@ -44,7 +44,7 @@ document.addEventListener('lazybeforeunveil', function(e) {
   if (!sources) return  // no video sources = not a video
 
   // Get all video widths, unique them, and sort descending
-  var widths = (_.uniq(sources.map(function(s) { return s[0] }))
+  var widths = ($.unique(sources.map(function(s) { return s[0] }))
                 .sort(function(a, b) { return b - a }))
   // default to smallest width in case we're on a really tiny screen
   var width = widths[widths.length - 1]
@@ -76,9 +76,9 @@ document.addEventListener('lazybeforeunveil', function(e) {
 })
 
 // Request metadata and add it to the description elements
-reqwest('metadata.yml').then(function(resp) {
+$.get('metadata.yml').done(function(resp) {
   var metadata = jsyaml.safeLoad(resp.responseText)
-  _.forOwn(metadata.slides, function(val, key) {
+  $.each(metadata.slides, function(key, val) {
     var id = slidesById[key] + '_desc'
     var elem = document.getElementById(id)
     var content = val.content
