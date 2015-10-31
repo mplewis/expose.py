@@ -22,10 +22,12 @@ Options:
 """
 VERSION = 'expose.py 0.0.1'
 
+# External deps
 import pyprind
 from docopt import docopt
 from jinja2 import Environment, FileSystemLoader
 
+# System deps
 import hashlib
 import json
 import yaml
@@ -41,9 +43,12 @@ from collections import (namedtuple, OrderedDict)
 from sys import exit
 from shutil import copy
 
+# Templates are relative to the script, not the source directory
 SCRIPT_DIR = dirname(realpath(__file__))
 TEMPLATES_DIR = join(SCRIPT_DIR, 'templates')
 
+# The FFmpeg commands used to convert a source video into a given format.
+# Video conversion is a lot trickier than image conversion.
 VIDEO_FMT_COMMANDS = {
     'h264': (
         'ffmpeg '
@@ -80,6 +85,7 @@ VIDEO_FMT_COMMANDS = {
     ),
 }
 
+# The extensions that go with each video format. Don't forget the dot.
 VIDEO_FMT_EXTS = {
     'h264': '.mp4',
     'webm': '.webm'
@@ -87,7 +93,9 @@ VIDEO_FMT_EXTS = {
 
 METADATA_FILENAME = 'metadata.yml'
 
-
+# Config is a named tuple that's passed between most of these methods. It
+# makes it easier to work with a runtime config without making the config a
+# global.
 Config = namedtuple('Config', ('SRC_DIR '
                                'DST_DIR '
                                'TEMPLATE '
@@ -98,14 +106,25 @@ Config = namedtuple('Config', ('SRC_DIR '
                                'VIDEO_BITRATES '
                                'VIDEO_VBR_MAX_RATIO'))
 
+# ImageJob and VideoJob are named tuples that hold info on a single image/video
+# output target job. They're easy to pass around multithreading pools.
 ImageJob = namedtuple('ImageJob', ('src dst size dry_run'))
 VideoJob = namedtuple('VideoJob', ('cfg src dst format resolution bitrate '
                                    'dry_run'))
 
 
 class WebMediaSlice:
+    """
+    A slice is a single processed file that makes up part of the output for
+    a given source media file.
+
+    For example, if canoe-trip.mp4 was the source file, you might see slices
+    like canoe-trip-640.mp4 and canoe-trip-1080.mp4.
+    """
     def __init__(self, source):
+        """Create a WebMediaSlice from a full path to an output file."""
         self.source = source
+        # Grab the width off the filename: *-WIDTH.*
         _, self.name = split(source)
         self.width = int(re.match(r'^.+-(\d+)\..+$', source).groups()[0])
 
@@ -117,11 +136,14 @@ class WebMediaSlice:
 
     @property
     def is_video(self):
+        """True if this is a video file, False otherwise"""
         return not self.source.endswith('.jpg')
 
 
 class WebMedia:
+    """A bundle of WebMediaSlices that corresponds to an input file."""
     def __init__(self, directory, sources):
+        """Create a WebMedia object from a set of output files."""
         self.directory = directory
         _, self.name = split(directory)
         self.slices = [WebMediaSlice(source) for source in sources]
@@ -134,6 +156,7 @@ class WebMedia:
 
     @property
     def is_video(self):
+        """True if any slice is a video file, False otherwise"""
         for s in self.slices:
             if s.is_video:
                 return True
@@ -141,6 +164,7 @@ class WebMedia:
 
 
 def src_images(cfg):
+    """List the paths to source images."""
     images = []
     for pattern in cfg.IMAGE_PATTERNS:
         images.extend(glob(join(cfg.SRC_DIR, pattern)))
@@ -148,17 +172,15 @@ def src_images(cfg):
 
 
 def src_videos(cfg):
+    """List the paths to source videos."""
     videos = []
     for pattern in cfg.VIDEO_PATTERNS:
         videos.extend(glob(join(cfg.SRC_DIR, pattern)))
     return videos
 
 
-def src_files(cfg):
-    return src_images(cfg) + src_videos(cfg)
-
-
 def mkdir_for_dst(dst, dry_run):
+    """Create a directory to the given path and all necessary parents."""
     out_dir, _ = split(dst)
     if dry_run:
         l.info('Dry run: makedirs {}'.format(out_dir))
@@ -167,6 +189,7 @@ def mkdir_for_dst(dst, dry_run):
 
 
 def convert_image(job):
+    """Convert a single output image designated by an ImageJob."""
     mkdir_for_dst(job.dst, dry_run)
     cmd = ['convert', job.src,
            '-resize', '{}x>'.format(job.size),
@@ -179,6 +202,9 @@ def convert_image(job):
 
 
 def convert_video(job):
+    """Convert a single output video designated by a VideoJob."""
+
+    # First create the output video
     mkdir_for_dst(job.dst, dry_run)
     options = dict(
         src=job.src,
@@ -196,6 +222,7 @@ def convert_video(job):
     else:
         check_call(cmd, shell=True)
 
+    # Then create the cover image
     name, ext = splitext(job.dst)
     poster_dst = name + '.jpg'
 
@@ -210,16 +237,19 @@ def convert_video(job):
             check_call(cmd, shell=True)
 
     if not job.dry_run:
+        # Hash only gets written when the video and its poster image are done
         write_hash(job.src, job.dst)
 
 
 def convert_image_wrap(queue_and_job):
+    """Wrapper to support multiprocessing ImageJobs with a progress queue."""
     queue, job = queue_and_job
     convert_image(job)
     queue.put(True)
 
 
 def convert_video_wrap(queue_and_job):
+    """Wrapper to support multiprocessing VideoJobs with a progress queue."""
     queue, job = queue_and_job
     l.debug(job)
     convert_video(job)
@@ -227,20 +257,30 @@ def convert_video_wrap(queue_and_job):
 
 
 def sanitary_name(src):
-    name, _ = splitext(basename(src))
-    return '-'.join(name.split())
+    """
+    Sanitize a name for conversion. Replace whitespace with hyphens.
+    Returns basename ONLY.
+    """
+    name, _ = sanitary_name_and_ext(src)
+    return name
 
 
 def sanitary_name_and_ext(src):
+    """
+    Sanitize a name for conversion. Replace whitespace with hyphens.
+    Returns basename, extension.
+    """
     name, ext = splitext(basename(src))
     return '-'.join(name.split()), ext
 
 
 def target_dir(cfg, src):
+    """Get the target directory path for a source media file."""
     return join(cfg.DST_DIR, sanitary_name(src))
 
 
 def dimensions(src):
+    """Get the dimensions of a video or image. (Works with images!!)"""
     cmd = ('ffprobe -v error -show_entries stream=width,height '
            '-of default=noprint_wrappers=1 -of json "{}"'
            .format(src))
@@ -250,6 +290,7 @@ def dimensions(src):
 
 # http://stackoverflow.com/a/3431838/254187
 def hash_file(src):
+    """SHA-256 a file and return the ASCII hex hash."""
     hash = hashlib.sha256()
     with open(src, 'rb') as f:
         for chunk in iter(lambda: f.read(4096), b""):
@@ -258,16 +299,23 @@ def hash_file(src):
 
 
 def write_hash(src, dst):
+    """Write the hash of a source file to the path specified."""
     with open(hash_path_for_dst(dst), 'w') as f:
         f.write(hash_file(src))
 
 
 def hash_path_for_dst(dst):
+    """Get the path of a hash file for a given output file."""
     path, name = split(dst)
     return join(path, '.' + name + '.src.sha256')
 
 
 def is_dirty(src, dst):
+    """
+    True if the destination file is up-to-date with the source file.
+    False if the destination file doesn't exist, the destination hash doesn't
+    exist, or the source file has changed since the hash was last generated.
+    """
     try:
         with open(hash_path_for_dst(dst)) as f:
             existing_hash = f.read()
@@ -276,7 +324,17 @@ def is_dirty(src, dst):
     return hash_file(src) != existing_hash
 
 
+# Major refactor target. This is too big.
+# Confusing naming between x_targets and x_jobs.
 def file_targets(cfg, src, is_video, dry_run):
+    """
+    Generate jobs for a single source media file.
+    Returns a list of jobs for this source file, and the number of jobs
+    skipped due to caching.
+
+    This method doesn't know what format the source file is - make sure to set
+    is_video properly based on the source file format.
+    """
     targets = []
     skipped = 0
     name, ext = sanitary_name_and_ext(src)
@@ -331,14 +389,29 @@ def file_targets(cfg, src, is_video, dry_run):
 
 
 def img_targets(cfg, src, dry_run):
+    """
+    Generate image jobs for a single source image file.
+    Returns a list of jobs for this source file, and the number of jobs
+    skipped due to caching.
+
+    This method only works on image sources.
+    """
     return file_targets(cfg, src, False, dry_run)
 
 
 def vid_targets(cfg, src, dry_run):
+    """
+    Generate video jobs for a single source video file.
+    Returns a list of jobs for this source file, and the number of jobs
+    skipped due to caching.
+
+    This method only works on video sources.
+    """
     return file_targets(cfg, src, True, dry_run)
 
 
 def media_jobs(cfg, dry_run, is_video):
+    """Generate either all image or all video jobs for a given config."""
     if is_video:
         media_lc = 'video'
         media_uc = 'Video'
@@ -371,14 +444,20 @@ def media_jobs(cfg, dry_run, is_video):
 
 
 def img_jobs(cfg, dry_run):
+    """Generate all image jobs for a given config."""
     return media_jobs(cfg, dry_run, False)
 
 
 def vid_jobs(cfg, dry_run):
+    """Generate all video jobs for a given config."""
     return media_jobs(cfg, dry_run, True)
 
 
 def run_jobs(jobs, is_video):
+    """
+    Run a set of image or video jobs. This processes the media and runs all
+    conversions in the jobs list.
+    """
     if not jobs:
         return
     if is_video:
@@ -402,14 +481,26 @@ def run_jobs(jobs, is_video):
 
 
 def run_img_jobs(jobs):
+    """
+    Run a set of image jobs. This processes the media and runs all
+    conversions in the jobs list.
+    """
     run_jobs(jobs, False)
 
 
 def run_vid_jobs(jobs):
+    """
+    Run a set of video jobs. This processes the media and runs all
+    conversions in the jobs list.
+    """
     run_jobs(jobs, True)
 
 
 def web_media_from_output(rendered_dir):
+    """
+    Get WebMedia objects from a directory that contains directories for all
+    output media.
+    """
     l.info('Gathering rendered media from {}'.format(rendered_dir))
     media_globs = ['*.mp4', '*.jpg', '*.webm']
     media_dirs = glob(join(rendered_dir, '*'))
@@ -428,10 +519,14 @@ def web_media_from_output(rendered_dir):
 
 
 def template_dir(cfg):
+    """Get the source directory for the template in use."""
     return join(TEMPLATES_DIR, cfg.TEMPLATE)
 
 
 def render_html_from_media(cfg, media, dry_run):
+    """
+    Read output files and render HTML into the output directory.
+    """
     l.info('Rendering HTML from {} media items'.format(len(media)))
     env = Environment(loader=FileSystemLoader(template_dir(cfg)))
     template = env.get_template('index.html.jinja2')
@@ -444,7 +539,10 @@ def render_html_from_media(cfg, media, dry_run):
             f.write(rendered)
 
 
-def copy_theme_static_files(cfg, dry_run):
+def copy_template_static_files(cfg, dry_run):
+    """
+    Copy the template's files into the output directory.
+    """
     l.info('Copying static files for theme')
     static_files = [f for f in glob(join(template_dir(cfg), '*'))
                     if not f.endswith('.jinja2')]
@@ -456,6 +554,7 @@ def copy_theme_static_files(cfg, dry_run):
 
 
 # http://stackoverflow.com/a/21912744
+# How does this work?
 def ordered_dump(data, stream=None, Dumper=yaml.Dumper, **kwds):
     class OrderedDumper(Dumper):
         pass
@@ -470,6 +569,7 @@ def ordered_dump(data, stream=None, Dumper=yaml.Dumper, **kwds):
 
 
 def generate_metadata_template(cfg):
+    """Generate an empty YAML metadata file from the available source media."""
     slides = {'slides': {}}
     for pattern in cfg.IMAGE_PATTERNS + cfg.VIDEO_PATTERNS:
         for f in glob(pattern):
@@ -482,6 +582,10 @@ def generate_metadata_template(cfg):
 
 
 def copy_metadata(cfg, dry_run):
+    """
+    Copy metadata from source YAML to output JSON. Create a blank template
+    if none exists.
+    """
     metadata = join(cfg.SRC_DIR, METADATA_FILENAME)
     if isfile(metadata):
         with open(metadata) as f:
@@ -499,6 +603,9 @@ def copy_metadata(cfg, dry_run):
 
 
 def create_template(cfg, dry_run):
+    """
+    Create a blank metadata template unless a metadata file already exists.
+    """
     metadata = join(cfg.SRC_DIR, METADATA_FILENAME)
 
     if isfile(metadata):
@@ -521,19 +628,25 @@ def create_template(cfg, dry_run):
 
 if __name__ == '__main__':
 
+    # Parse args with the docstring using Docopt
     args = docopt(__doc__, version=VERSION)
 
+    # Most libraries set their log level to WARN during normal use.
+    # We set ours to INFO during normal use and DEBUG during --verbose.
     log_level = l.INFO
     if args['--verbose']:
         log_level = l.DEBUG
     l.basicConfig(format='%(message)s', level=log_level)
 
+    # --paths: display paths and exit
     if args['--paths']:
         l.info('Working directory:   {}'.format(getcwd()))
         l.info('expose.py directory: {}'.format(SCRIPT_DIR))
         l.info('Template directory:  {}'.format(TEMPLATES_DIR))
         exit(0)
 
+    # The default config.
+    # No way to modify this right now besides editing this file.
     config = Config(
         SRC_DIR=getcwd(),
         DST_DIR=join(getcwd(), '_site'),
@@ -546,8 +659,11 @@ if __name__ == '__main__':
         VIDEO_VBR_MAX_RATIO=2,
     )
 
+    # Dry run: don't write anything
     dry_run = args['--dry-run']
 
+    # Create template: simply create a metadata.yml if it doesn't already
+    # exist. If it does, throw an error and exit
     if args['--create-template']:
         l.info('Creating a new metadata template')
         if create_template(config, dry_run):
@@ -555,6 +671,8 @@ if __name__ == '__main__':
         else:
             exit(1)  # couldn't create template
 
+    # --site-only: useful for when you're tweaking your template, because
+    # parsing image/video jobs can take a while
     if args['--site-only']:
         l.info('Skipping render phase')
     else:
@@ -563,7 +681,12 @@ if __name__ == '__main__':
         run_img_jobs(ij)
         run_vid_jobs(vj)
 
+    # These steps should be self-explanatory:
+    # Read the output dir and make a list of media found
     media = web_media_from_output(config.DST_DIR)
+    # Render HTML from the media we just found
     render_html_from_media(config, media, dry_run)
-    copy_theme_static_files(config, dry_run)
+    # Add the template files
+    copy_template_static_files(config, dry_run)
+    # Copy the metadata.yml into a metadata.json
     copy_metadata(config, dry_run)

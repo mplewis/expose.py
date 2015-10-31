@@ -13,6 +13,27 @@ I like what Expose does. But encoding photos and videos takes a long time, and E
 
 So I rebuilt the parts of Expose I liked and added features I needed.
 
+I probably won't release this as a Python package. Packaging isn't fun, and this is a fun little script, so clone it and have fun with it!
+
+# Installation
+
+This script requires Python 3 and the following dependencies:
+
+* pyprind
+* docopt
+* jinja2
+
+Install them with the following:
+
+```sh
+pip3 install pyprind docopt jinja2
+```
+
+Then clone or download this repo into a directory of your choice. Either:
+
+* symlink `expose.py` somewhere into your `$PATH`, or
+* create an alias pointing to `expose.py` in your `.bashrc`/`.zsrhc`
+
 # Usage
 
 ```sh
@@ -55,15 +76,14 @@ Copyright (c) 2015 Matthew Lewis. Licensed under [the MIT License](http://openso
 
 ## Code
 
-* Docstrings. Docstrings everywhere
 * Move JS deps into the app instead of running off cdnjs
+* Configurable, non-hard-coded config
+* Alternate source/output dirs
 
 ## Docs
 
 * Screenshots
-* Contributions
 * More in-depth usage
-* `LICENSE`
 * YAML format docs
 * Template
 * Styling by slide
