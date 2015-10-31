@@ -26,6 +26,7 @@ from jinja2 import Environment, FileSystemLoader
 
 import hashlib
 import json
+import yaml
 import re
 import logging as l
 from multiprocessing import Pool, Manager
@@ -453,11 +454,15 @@ def copy_theme_static_files(cfg, dry_run):
 def copy_metadata(cfg, dry_run):
     metadata = join(cfg.SRC_DIR, 'metadata.yml')
     if isfile(metadata):
-        if dry_run:
-            l.info('Dry run: Copying metadata.yml')
-        else:
-            l.info('Copying metadata.yml')
-            copy(metadata, cfg.DST_DIR)
+        with open(metadata, 'r') as f:
+            metadata = json.dumps(yaml.load(f))
+            json_path = join(cfg.DST_DIR, 'metadata.json')
+            if dry_run:
+                l.info('Dry run: Writing {}'.format(json_path))
+            else:
+                l.info('Writing {}'.format(json_path))
+                with open(json_path, 'w') as j:
+                    j.write(metadata)
     else:
         if dry_run:
             l.info('Dry run: No metadata.yml found; creating empty file')
