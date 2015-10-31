@@ -76,8 +76,7 @@ document.addEventListener('lazybeforeunveil', function(e) {
 })
 
 // Request metadata and add it to the description elements
-$.get('metadata.yml').done(function(resp) {
-  var metadata = jsyaml.safeLoad(resp.responseText)
+$.getJSON('metadata.json').done(function(metadata) {
   $.each(metadata.slides, function(key, val) {
     var id = slidesById[key] + '_desc'
     var elem = document.getElementById(id)
