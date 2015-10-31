@@ -5,18 +5,20 @@ process photos and videos into a static site photojournal
 https://github.com/mplewis/expose.py
 
 Usage:
-    expose.py [(-v | --verbose)] [(-d | --dry-run)] [(-s | --site-only)]
-    expose.py (-h | --help)
+    expose.py [--verbose --dry-run --site-only]
+    expose.py [--dry-run] --create-template
+    expose.py --help
     expose.py --version
     expose.py --paths
 
 Options:
-    -h --help       Show this screen
-    --version       Show version
-    --paths         Show script and working directories
-    -v --verbose    Enable verbose log messages
-    -d --dry-run    Log all actions but don't execute them
-    -s --site-only  Skip rendering and just build HTML
+    -h, --help             Show this screen
+    --version              Show version
+    --paths                Show script and working directories
+    -v, --verbose          Enable verbose log messages
+    -d, --dry-run          Log all actions but don't execute them
+    -s, --site-only        Skip rendering and just build HTML
+    -c, --create-template  Create a blank metadata.yml for source files
 """
 VERSION = 'expose.py 0.0.1'
 
@@ -82,6 +84,8 @@ VIDEO_FMT_EXTS = {
     'h264': '.mp4',
     'webm': '.webm'
 }
+
+METADATA_FILENAME = 'metadata.yml'
 
 
 Config = namedtuple('Config', ('SRC_DIR '
@@ -450,16 +454,20 @@ def copy_theme_static_files(cfg, dry_run):
         else:
             copy(f, cfg.DST_DIR)
 
+
 # http://stackoverflow.com/a/21912744
 def ordered_dump(data, stream=None, Dumper=yaml.Dumper, **kwds):
     class OrderedDumper(Dumper):
         pass
+
     def _dict_representer(dumper, data):
         return dumper.represent_mapping(
             yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
             data.items())
+
     OrderedDumper.add_representer(OrderedDict, _dict_representer)
     return yaml.dump(data, stream, OrderedDumper, **kwds)
+
 
 def generate_metadata_template(cfg):
     slides = {'slides': {}}
@@ -472,10 +480,11 @@ def generate_metadata_template(cfg):
             }
     return ordered_dump(slides, default_flow_style=False)
 
+
 def copy_metadata(cfg, dry_run):
-    metadata = join(cfg.SRC_DIR, 'metadata.yml')
+    metadata = join(cfg.SRC_DIR, METADATA_FILENAME)
     if isfile(metadata):
-        with open(metadata, 'r') as f:
+        with open(metadata) as f:
             metadata = json.dumps(yaml.load(f))
             json_path = join(cfg.DST_DIR, 'metadata.json')
             if dry_run:
@@ -485,14 +494,29 @@ def copy_metadata(cfg, dry_run):
                 with open(json_path, 'w') as j:
                     j.write(metadata)
     else:
+        l.info('No {} found'.format(METADATA_FILENAME))
+        create_template(cfg, dry_run)
+
+
+def create_template(cfg, dry_run):
+    metadata = join(cfg.SRC_DIR, METADATA_FILENAME)
+
+    if isfile(metadata):
+        l.error('{} exists already, cowardly refusing to overwrite it.'
+                .format(METADATA_FILENAME))
+        l.error('If you want to create a new template from scratch, please '
+                'delete the existing {}, then re-run this command.'
+                .format(METADATA_FILENAME))
+        return False
+
+    if dry_run:
+        l.info('Dry run: Writing metadata template to {}'.format(metadata))
+    else:
+        l.info('Writing metadata template to {}'.format(metadata))
         metadata_template = generate_metadata_template(cfg)
-        if dry_run:
-            l.info('Dry run: No metadata.yml found; writing template:\n{}'
-                .format(metadata_template))
-        else:
-            l.info('No metadata.yml found; writing template')
-            with open(metadata, 'w') as f:
-                f.write(metadata_template)
+        with open(metadata, 'w') as f:
+            f.write(metadata_template)
+    return True
 
 
 if __name__ == '__main__':
@@ -523,6 +547,13 @@ if __name__ == '__main__':
     )
 
     dry_run = args['--dry-run']
+
+    if args['--create-template']:
+        l.info('Creating a new metadata template')
+        if create_template(config, dry_run):
+            exit(0)
+        else:
+            exit(1)  # couldn't create template
 
     if args['--site-only']:
         l.info('Skipping render phase')
